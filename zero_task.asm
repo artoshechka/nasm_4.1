@@ -9,7 +9,7 @@ section .data
     lenDifferenceMsg        equ $-differenceMsg
     strNumsSize             equ 256
     numsSize                equ 8
-    newline                 db 10
+    space                   db " "
     buffer                  times 21 db 0
 
 section .bss
@@ -19,8 +19,8 @@ section .bss
     strNumA resb strNumsSize
     strNumB resb strNumsSize
     strNumC resb strNumsSize
-    maxNum  resq numsSize      ; Переменная для хранения максимума
-    
+    maxNum  resq numsSize
+
 section .text
 
 _start:
@@ -56,20 +56,14 @@ _start:
     ; Конвертация строк в числа
     mov rsi, strNumA
     call FuncStrToInt
-    call FuncPrintNumber ;DEDUG
-
     mov [numA], rax
 
     mov rsi, strNumB
     call FuncStrToInt
-    call FuncPrintNumber ;DEDUG
-
     mov [numB], rax
 
     mov rsi, strNumC
     call FuncStrToInt
-    call FuncPrintNumber ;DEDUG
-
     mov [numC], rax
 
     ; Поиск максимума из трех чисел
@@ -79,9 +73,6 @@ _start:
     
     mov rbx, [numC]
     call FuncMax              ; rax = max(max(A, B), C)
-    call FuncPrintNumber ;DEDUG
-
-    
     mov [maxNum], rax         ; Сохраняем максимум
 
     ; Вычисление и вывод разниц
@@ -89,29 +80,42 @@ _start:
     mov rdx, lenDifferenceMsg
     call FuncPrintMsg
 
-    ; Разница между максимумом и числом A
-    mov rax, [maxNum]
-    sub rax, [numA]
+    ; Разница между числом A и максимумом
+    mov rax, [numA]
+    cmp rax, [maxNum]
+    je .simple_printA
+    sub rax, [maxNum]
+.simple_printA:
     call FuncPrintNumber
     
-    ; Разница между максимумом и числом B
-    mov rax, [maxNum]
-    sub rax, [numB]
+    ; Разница между числом B и максимумом
+    mov rax, [numB]
+    cmp rax, [maxNum]
+    je .simple_printB
+    sub rax, [maxNum]
+.simple_printB:
     call FuncPrintNumber
     
-    ; Разница между максимумом и числом C
-    mov rax, [maxNum]
-    sub rax, [numC]
+    ; Разница между числом C и максимумом
+    mov rax, [numC]
+    cmp rax, [maxNum]
+    je .simple_printC
+    sub rax, [maxNum]
+.simple_printC:
     call FuncPrintNumber
 
     ; Завершение программы
+    mov rax, 60
     xor rdi, rdi
-    call FuncEnd
+    syscall
 
-; Функция для печати числа
+FuncPrintNumber:
+; Функция: FuncPrintNumber
+; Назначение: Печать числа в десятичном формате
 ; Вход: RAX - число для печати
 ; Используемые регистры: RAX, RBX, RCX, RDX, RSI, RDI
-FuncPrintNumber:
+; Сохраняемые регистры: Все (push/pop)
+
     push rax
     push rbx
     push rcx
@@ -131,8 +135,7 @@ FuncPrintNumber:
     call FuncPrintMsg
     
     ; Вывод пробела
-    mov byte [buffer], ' '
-    mov rsi, buffer
+    mov rsi, space
     mov rdx, 1
     call FuncPrintMsg
     
@@ -144,11 +147,13 @@ FuncPrintNumber:
     pop rax
     ret
 
-; Функция для вычисления длины строки
-; Вход: RSI - указатель на строку
+FuncStrLen:
+; Функция: FuncStrLen
+; Назначение: Вычисление длины строки
+; Вход: RSI - указатель на строку (нуль-терминированную)
 ; Выход: RAX - длина строки
 ; Используемые регистры: RAX, RCX
-FuncStrLen:
+
     xor rcx, rcx
 .loop:
     cmp byte [rsi + rcx], 0
@@ -159,130 +164,116 @@ FuncStrLen:
     mov rax, rcx
     ret
 
-; Функция завершения программы
-; Вход: RDI - код возврата
-; Используемые регистры: RAX
-FuncEnd:
-    mov rax, 60
-    syscall
-    ret
-
-; Функция печати сообщения
+FuncPrintMsg:
+; Функция: FuncPrintMsg
+; Назначение: Вывод сообщения на экран
 ; Вход: RSI - указатель на сообщение, RDX - длина сообщения
 ; Используемые регистры: RAX, RDI
-FuncPrintMsg:
     mov rax, 1
     mov rdi, 1
     syscall
     ret
 
-; Функция чтения строки
+FuncReadString:
+; Функция: FuncReadString
+; Назначение: Чтение строки из stdin
 ; Вход: RSI - буфер для строки, RDX - размер буфера
 ; Используемые регистры: RAX, RDI
-FuncReadString:
     mov rax, 0
     mov rdi, 0
     syscall
     ret
 
-; Функция преобразования строки в число
-; Вход: RSI - указатель на строку
-; Выход: RAX - число
-; Используемые регистры: RAX, RBX, RCX, RDX
 FuncStrToInt:
+; Функция: FuncStrToInt
+; Назначение: Преобразование строки в целое число
+; Вход: RSI - указатель на строку
+; Выход: RAX - преобразованное число
+; Используемые регистры: RAX, RBX, RCX, RDX, R8
     xor rax, rax
     xor rcx, rcx
-    xor rbx, rbx
-    mov rbx, 1              ; Флаг знака: 1 - положительное, -1 - отрицательное
+    mov r8, 1               ; Флаг знака: 1 - положительное, -1 - отрицательное
 
-    .loop:
-        mov bl, byte [rsi + rcx]
-        cmp bl, 0xA         ; Проверка на символ новой строки
-        je .done
-        cmp bl, 0           ; Проверка на конец строки
-        je .done
-        cmp bl, '-'         ; Проверка на знак минус
-        jne .checkDigit
-        mov rbx, -1         ; Устанавливаем флаг отрицательного числа
-        inc rcx
-        jmp .loop
+    ; Пропускаем пробелы в начале
+.skip_spaces:
+    mov bl, byte [rsi + rcx]
+    cmp bl, ' '
+    jne .check_sign
+    inc rcx
+    jmp .skip_spaces
 
-    .checkDigit:
-        cmp bl, '0'
-        jl .inputError
-        cmp bl, '9'
-        jg .inputError
-        sub bl, '0'         ; Преобразование символа в цифру
-        imul rax, rax, 10   ; Умножение текущего результата на 10
-        movzx rdx, bl
-        add rax, rdx        ; Добавление новой цифры
-        inc rcx
-        jmp .loop
+.check_sign:
+    mov bl, byte [rsi + rcx]
+    cmp bl, '-'
+    jne .convert_loop
+    mov r8, -1
+    inc rcx
+
+.convert_loop:
+    mov bl, byte [rsi + rcx]
+    cmp bl, 0xA         ; Проверка на символ новой строки
+    je .done
+    cmp bl, 0           ; Проверка на конец строки
+    je .done
+    cmp bl, '0'
+    jl .done
+    cmp bl, '9'
+    jg .done
     
-    .inputError:
-        mov rdi, 1
-        call FuncEnd
+    sub bl, '0'         ; Преобразование символа в цифру
+    imul rax, 10        ; Умножение текущего результата на 10
+    movzx rdx, bl
+    add rax, rdx        ; Добавление новой цифры
+    inc rcx
+    jmp .convert_loop
 
-    .done:
-        imul rax, rbx       ; Умножение на знак
-        ret
+.done:
+    imul rax, r8        ; Умножение на знак
+    ret
 
-; Функция поиска максимума
-; Вход: RAX, RBX - числа для сравнения
+FuncMax:
+; Функция: FuncMax
+; Назначение: Поиск максимального из двух чисел
+; Вход: RAX - первое число, RBX - второе число
 ; Выход: RAX - максимальное число
 ; Используемые регистры: RAX, RBX
-FuncMax:
     cmp rax, rbx
     jge .no_swap
-    mov rax, rbx            ; Если RBX > RAX, копируем RBX в RAX
+    mov rax, rbx
 .no_swap:
     ret
 
-; Функция преобразования числа в строку
-; Вход: RAX - число, RDI - буфер для строки
-; Используемые регистры: RAX, RBX, RCX, RDX, RSI
 FuncIntToStr:
+; Функция: FuncIntToStr
+; Назначение: Преобразование целого числа в строку
+; Вход: RAX - число для преобразования, RDI - буфер для строки
+; Используемые регистры: RAX, RBX, RCX, RDX, RSI, RDI
     mov rsi, rdi
-    xor rcx, rcx
-    test rax, rax           ; Проверка знака числа
+    test rax, rax
     jns .convert
-    neg rax                 ; Если отрицательное, делаем положительным
-    mov cl, 1               ; Устанавливаем флаг отрицательного числа
+    neg rax
+    mov byte [rsi], '-'
+    inc rsi
 
 .convert:
-    lea rbx, [rsi + 20]     ; Указатель на конец буфера
-    mov byte [rbx], 0       ; Завершающий нуль
-    dec rbx
+    mov rbx, 10
+    mov rcx, 0
+    mov rdi, rsi
 
-    cmp rax, 0
-    jne .loop
-    mov byte [rbx], '0'     ; Если число 0
-    dec rbx
-    jmp .sign
-
-.loop:
+.convert_loop:
     xor rdx, rdx
-    mov rcx, 10
-    div rcx                 ; Делим RAX на 10
-    add dl, '0'             ; Преобразуем остаток в символ
-    mov [rbx], dl           ; Сохраняем символ
-    dec rbx
-    test rax, rax           ; Проверяем, не стало ли частное нулем
-    jnz .loop
+    div rbx
+    add dl, '0'
+    push rdx
+    inc rcx
+    test rax, rax
+    jnz .convert_loop
 
-.sign:
-    test cl, cl             ; Проверяем флаг знака
-    jz .copy
-    mov byte [rbx], '-'     ; Добавляем знак минус
-    dec rbx
+.pop_loop:
+    pop rax
+    mov [rdi], al
+    inc rdi
+    loop .pop_loop
 
-.copy:
-    inc rbx                 ; Перемещаемся к началу числа
-.copyLoop:
-    mov al, [rbx]           ; Копируем число в начало буфера
-    mov [rsi], al
-    inc rbx
-    inc rsi
-    test al, al             ; Проверяем на конец строки
-    jnz .copyLoop
+    mov byte [rdi], 0
     ret
