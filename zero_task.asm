@@ -7,9 +7,18 @@ section .data
     lenstrNumberEntrenceMsg equ $-strNumberEntrenceMsg
     differenceMsg:          db "Разницы: "
     lenDifferenceMsg        equ $-differenceMsg
+    errorMsg:               db "Ошибка: ", 0
+    lenErrorMsg             equ $-errorMsg
+    invalidNumberMsg:       db "неверный формат числа", 10, 0
+    lenInvalidNumberMsg     equ $-invalidNumberMsg
+    overflowMsg:            db "переполнение числа", 10, 0
+    lenOverflowMsg          equ $-overflowMsg
+    readErrorMsg:           db "ошибка чтения", 10, 0
+    lenReadErrorMsg         equ $-readErrorMsg
     strNumsSize             equ 256
     numsSize                equ 8
     space                   db " "
+    newline                 db 10
     buffer                  times 21 db 0
 
 section .bss
@@ -36,6 +45,7 @@ _start:
     mov rsi, strNumA
     mov rdx, strNumsSize
     call FuncReadString
+    jc .read_error         ; Проверка ошибки чтения
 
     ; Ввод числа B
     mov rsi, strNumberEntrenceMsg
@@ -44,6 +54,7 @@ _start:
     mov rsi, strNumB
     mov rdx, strNumsSize
     call FuncReadString
+    jc .read_error
 
     ; Ввод числа C
     mov rsi, strNumberEntrenceMsg
@@ -52,18 +63,22 @@ _start:
     mov rsi, strNumC
     mov rdx, strNumsSize
     call FuncReadString
+    jc .read_error
 
     ; Конвертация строк в числа
     mov rsi, strNumA
     call FuncStrToInt
+    jc .conversion_error   ; Проверка ошибки конвертации
     mov [numA], rax
 
     mov rsi, strNumB
     call FuncStrToInt
+    jc .conversion_error
     mov [numB], rax
 
     mov rsi, strNumC
     call FuncStrToInt
+    jc .conversion_error
     mov [numC], rax
 
     ; Поиск максимума из трех чисел
@@ -104,9 +119,46 @@ _start:
 .simple_printC:
     call FuncPrintNumber
 
-    ; Завершение программы
+    ; Завершение программы с успехом
     mov rax, 60
     xor rdi, rdi
+    syscall
+
+.read_error:
+    ; Обработка ошибки чтения
+    mov rsi, errorMsg
+    mov rdx, lenErrorMsg
+    call FuncPrintError
+    mov rsi, readErrorMsg
+    mov rdx, lenReadErrorMsg
+    call FuncPrintError
+    jmp .exit_error
+
+.conversion_error:
+    ; Обработка ошибки конвертации
+    mov rsi, errorMsg
+    mov rdx, lenErrorMsg
+    call FuncPrintError
+    cmp rax, 1
+    je .invalid_number
+    cmp rax, 2
+    je .overflow_error
+
+.invalid_number:
+    mov rsi, invalidNumberMsg
+    mov rdx, lenInvalidNumberMsg
+    call FuncPrintError
+    jmp .exit_error
+
+.overflow_error:
+    mov rsi, overflowMsg
+    mov rdx, lenOverflowMsg
+    call FuncPrintError
+
+.exit_error:
+    ; Завершение программы с ошибкой
+    mov rax, 60
+    mov rdi, 1
     syscall
 
 FuncPrintNumber:
@@ -166,7 +218,7 @@ FuncStrLen:
 
 FuncPrintMsg:
 ; Функция: FuncPrintMsg
-; Назначение: Вывод сообщения на экран
+; Назначение: Вывод сообщения на экран (stdout)
 ; Вход: RSI - указатель на сообщение, RDX - длина сообщения
 ; Используемые регистры: RAX, RDI
     mov rax, 1
@@ -174,25 +226,50 @@ FuncPrintMsg:
     syscall
     ret
 
+FuncPrintError:
+; Функция: FuncPrintError
+; Назначение: Вывод сообщения об ошибке (stderr)
+; Вход: RSI - указатель на сообщение, RDX - длина сообщения
+; Используемые регистры: RAX, RDI
+    mov rax, 1
+    mov rdi, 2
+    syscall
+    ret
+
 FuncReadString:
 ; Функция: FuncReadString
 ; Назначение: Чтение строки из stdin
 ; Вход: RSI - буфер для строки, RDX - размер буфера
+; Выход: CF = 1 если ошибка, CF = 0 если успех
 ; Используемые регистры: RAX, RDI
     mov rax, 0
     mov rdi, 0
     syscall
+    
+    ; Проверка на ошибку чтения
+    cmp rax, 0
+    jl .error
+    jmp .success
+    
+.error:
+    stc                    ; Установка флага переноса (CF = 1)
+    ret
+    
+.success:
+    clc                    ; Сброс флага переноса (CF = 0)
     ret
 
 FuncStrToInt:
 ; Функция: FuncStrToInt
 ; Назначение: Преобразование строки в целое число
 ; Вход: RSI - указатель на строку
-; Выход: RAX - преобразованное число
-; Используемые регистры: RAX, RBX, RCX, RDX, R8
+; Выход: RAX - преобразованное число, CF = 0 если успех
+;         RAX = 1 если неверный формат, RAX = 2 если переполнение, CF = 1 если ошибка
+; Используемые регистры: RAX, RBX, RCX, RDX, R8, R9
     xor rax, rax
     xor rcx, rcx
     mov r8, 1               ; Флаг знака: 1 - положительное, -1 - отрицательное
+    mov r9, 0               ; Счетчик цифр
 
     ; Пропускаем пробелы в начале
 .skip_spaces:
@@ -205,9 +282,19 @@ FuncStrToInt:
 .check_sign:
     mov bl, byte [rsi + rcx]
     cmp bl, '-'
-    jne .convert_loop
+    jne .check_empty
     mov r8, -1
     inc rcx
+
+.check_empty:
+    ; Проверка на пустую строку
+    mov bl, byte [rsi + rcx]
+    cmp bl, 0xA         ; Новая строка
+    je .invalid_format
+    cmp bl, 0           ; Конец строки
+    je .invalid_format
+    cmp bl, ' '         ; Пробел
+    je .invalid_format
 
 .convert_loop:
     mov bl, byte [rsi + rcx]
@@ -215,20 +302,52 @@ FuncStrToInt:
     je .done
     cmp bl, 0           ; Проверка на конец строки
     je .done
-    cmp bl, '0'
-    jl .done
-    cmp bl, '9'
-    jg .done
+    cmp bl, ' '         ; Пробел - конец числа
+    je .done
     
+    ; Проверка на валидность цифры
+    cmp bl, '0'
+    jl .invalid_format
+    cmp bl, '9'
+    jg .invalid_format
+    
+    inc r9              ; Увеличиваем счетчик цифр
     sub bl, '0'         ; Преобразование символа в цифру
-    imul rax, 10        ; Умножение текущего результата на 10
+    
+    ; Проверка на переполнение перед умножением
+    push rdx
+    mov rdx, 10
+    imul rax, rdx
+    pop rdx
+    jo .overflow        ; Проверка переполнения умножения
+    
+    ; Проверка на переполнение перед сложением
     movzx rdx, bl
-    add rax, rdx        ; Добавление новой цифры
+    add rax, rdx
+    jo .overflow        ; Проверка переполнения сложения
+    
     inc rcx
     jmp .convert_loop
 
 .done:
+    ; Проверка что было хотя бы одна цифра
+    cmp r9, 0
+    je .invalid_format
+    
     imul rax, r8        ; Умножение на знак
+    jo .overflow        ; Проверка переполнения при умножении на -1
+    
+    clc                 ; CF = 0 - успех
+    ret
+
+.invalid_format:
+    mov rax, 1
+    stc                 ; CF = 1 - ошибка
+    ret
+
+.overflow:
+    mov rax, 2
+    stc                 ; CF = 1 - ошибка
     ret
 
 FuncMax:
